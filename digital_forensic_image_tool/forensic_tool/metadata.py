@@ -1,21 +1,47 @@
 """Metadata extraction.
 
 EXIF is read with ExifRead because it exposes camera metadata in a convenient
-and predictable tag-oriented structure. IPTC support varies by image format;
-Pillow may expose raw IPTC information for JPEG/TIFF files, so this module
-makes a best-effort extraction without claiming that absent metadata means
-the image has never contained it.
+and predictable tag-oriented structure. IPTC is extracted via Pillow's
+IptcImagePlugin and mapped to standard human-readable IIM field names.
 """
 
 from pathlib import Path
 from typing import Any
 
 import exifread
-from PIL import Image
+from PIL import Image, IptcImagePlugin
+
+# Common IPTC-IIM Application Record (Dataset 2) tag names
+IPTC_TAGS: dict[tuple[int, int], str] = {
+    (2, 5): "Object Name (Title)",
+    (2, 15): "Category",
+    (2, 20): "Supplemental Categories",
+    (2, 25): "Keywords",
+    (2, 40): "Special Instructions",
+    (2, 55): "Date Created",
+    (2, 60): "Time Created",
+    (2, 80): "By-line (Creator)",
+    (2, 85): "By-line Title",
+    (2, 90): "City",
+    (2, 95): "Province/State",
+    (2, 100): "Country Code",
+    (2, 101): "Country Name",
+    (2, 103): "Transmission Reference",
+    (2, 105): "Headline",
+    (2, 110): "Credit",
+    (2, 115): "Source",
+    (2, 116): "Copyright Notice",
+    (2, 120): "Caption/Abstract",
+    (2, 122): "Writer/Editor",
+}
 
 
 def _clean_value(value: Any) -> str:
-    """Convert metadata values into JSON/report-friendly strings."""
+    """Convert metadata values (including byte strings and lists) into readable strings."""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace").strip()
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_clean_value(item) for item in value)
     return str(value)
 
 
@@ -34,7 +60,7 @@ def extract_exif(path: Path) -> dict[str, str]:
         for tag, value in tags.items():
             # Thumbnail binary data is not useful in the text report and can
             # make JSON enormous, so it is intentionally excluded.
-            if tag.lower() == "thumbnail":
+            if tag.lower() == "thumbnail" or tag == "JPEGThumbnail":
                 continue
             tags_out[tag] = _clean_value(value)
 
@@ -47,23 +73,17 @@ def extract_exif(path: Path) -> dict[str, str]:
 
 
 def extract_iptc(path: Path) -> dict[str, str]:
-    """Attempt to extract IPTC information exposed through Pillow.
-
-    IPTC is commonly stored in JPEG APP13 data. Pillow's info dictionary may
-    expose this under an 'iptc' key depending on the image and Pillow version.
-    Since support is format-dependent, an empty result is considered normal.
-    """
+    """Extract and decode IPTC-IIM metadata blocks using Pillow's IptcImagePlugin."""
     iptc_out: dict[str, str] = {}
 
     try:
         with Image.open(path) as image:
-            raw_iptc = image.info.get("iptc")
+            raw_iptc = IptcImagePlugin.getiptcinfo(image)
 
             if isinstance(raw_iptc, dict):
                 for key, value in raw_iptc.items():
-                    iptc_out[str(key)] = _clean_value(value)
-            elif raw_iptc is not None:
-                iptc_out["raw"] = _clean_value(raw_iptc)
+                    label = IPTC_TAGS.get(key, f"IPTC {key}")
+                    iptc_out[label] = _clean_value(value)
     except Exception:
         pass
 
