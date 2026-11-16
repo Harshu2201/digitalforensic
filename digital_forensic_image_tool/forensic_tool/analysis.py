@@ -1,8 +1,8 @@
 """Forensic file analysis.
 
 This module focuses on evidence-oriented properties rather than visual
-editing. It records hashes, filesystem timestamps and a simple integrity
-assessment.
+editing. It records hashes, filesystem timestamps, integrity assessment,
+and Error Level Analysis (ELA).
 
 Important limitation: filesystem timestamps are metadata maintained by the
 operating system/filesystem. They are not automatically proof of acquisition,
@@ -13,6 +13,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 import hashlib
+import tempfile
+
+from PIL import Image, ImageChops, ImageEnhance
 
 from .config import HASH_ALGORITHMS, HASH_CHUNK_SIZE
 
@@ -77,5 +80,52 @@ def integrity_status(image_properties: dict, verification: dict) -> dict[str, An
             "Image was successfully recognized and decoded by the implemented checks."
             if passed
             else "One or more image validation checks failed."
+        ),
+    }
+
+
+def perform_ela(
+    path: Path, format_info: dict[str, Any], quality: int = 90
+) -> dict[str, Any]:
+    """Perform Error Level Analysis (ELA) on JPEG evidence without altering the original."""
+    detected_format = str(format_info.get("detected_format", "")).upper()
+
+    if detected_format != "JPEG":
+        return {
+            "status": "SKIPPED",
+            "reason": "ELA is only applicable to lossy JPEG images.",
+        }
+
+    output_path = path.with_name(f"{path.stem}_ela.jpg")
+
+    with Image.open(path) as img:
+        original = img.convert("RGB")
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        temp_path = Path(tmp.name)
+
+    try:
+        original.save(temp_path, "JPEG", quality=quality)
+        with Image.open(temp_path) as resaved:
+            ela_image = ImageChops.difference(original, resaved)
+
+        extrema = ela_image.getextrema()
+        max_diff = max(band_max for _, band_max in extrema)
+        scale = 255.0 / (max_diff if max_diff > 0 else 1)
+
+        ela_image = ImageEnhance.Brightness(ela_image).enhance(scale)
+        ela_image.save(output_path, "JPEG")
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    return {
+        "status": "GENERATED",
+        "quality_level": quality,
+        "max_difference": max_diff,
+        "output_image": str(output_path.resolve()),
+        "interpretation": (
+            "Bright, high-contrast regions in the ELA output may indicate "
+            "localized re-saving or splicing."
         ),
     }

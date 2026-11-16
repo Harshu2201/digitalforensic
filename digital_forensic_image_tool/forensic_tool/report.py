@@ -13,6 +13,7 @@ def build_report(
     metadata: dict[str, dict[str, str]],
     verification: dict[str, Any],
     integrity: dict[str, Any],
+    ela: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Combine results from independent modules into one report object."""
     return {
@@ -23,6 +24,7 @@ def build_report(
         "metadata": metadata,
         "verification": verification,
         "integrity": integrity,
+        "ela": ela or {},
     }
 
 
@@ -34,7 +36,10 @@ def _print_metadata(title: str, data: dict[str, str]) -> None:
 
     print(f"Tags found       : {len(data)}")
     for key, value in data.items():
-        print(f"{key:<24}: {value}")
+        if key == "JPEGThumbnail":
+            print(f"{key:<24}: <Embedded thumbnail bytes omitted for readability>")
+        else:
+            print(f"{key:<24}: {value}")
 
 
 def print_report(report: dict[str, Any], summary: bool = False) -> None:
@@ -47,6 +52,7 @@ def print_report(report: dict[str, Any], summary: bool = False) -> None:
     fmt = report["format"]
     props = report["image_properties"]
     integrity = report["integrity"]
+    ela = report.get("ela", {})
 
     print("\n[FILE]")
     print(f"Path             : {file_info['path']}")
@@ -77,6 +83,17 @@ def print_report(report: dict[str, Any], summary: bool = False) -> None:
     print(f"Created          : {file_info['created']}")
     print(f"Modified         : {file_info['modified']}")
     print(f"Accessed         : {file_info['accessed']}")
+
+    if ela:
+        print("\n[ERROR LEVEL ANALYSIS (ELA)]")
+        print(f"ELA Status       : {ela.get('status', 'UNKNOWN')}")
+        if ela.get("status") == "GENERATED":
+            print(f"Quality Level    : {ela['quality_level']}%")
+            print(f"Max Pixel Diff   : {ela['max_difference']}")
+            print(f"Output Image     : {ela['output_image']}")
+            print(f"Interpretation   : {ela['interpretation']}")
+        elif "reason" in ela:
+            print(f"Reason           : {ela['reason']}")
 
     if not summary:
         _print_metadata("EXIF", report["metadata"]["exif"])

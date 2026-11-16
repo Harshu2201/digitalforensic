@@ -8,6 +8,7 @@ from .analysis import (
     calculate_hashes,
     collect_file_properties,
     integrity_status,
+    perform_ela,
 )
 from .image_processor import detect_format, get_image_properties, verify_image
 from .metadata import extract_metadata
@@ -56,6 +57,9 @@ def analyze_image(path: Path) -> dict:
 
     integrity = integrity_status(image_properties, verification)
 
+    # Error Level Analysis saves a visual heatmap alongside the input file.
+    ela = perform_ela(path, format_info)
+
     return build_report(
         file_properties,
         format_info,
@@ -64,6 +68,7 @@ def analyze_image(path: Path) -> dict:
         metadata,
         verification,
         integrity,
+        ela,
     )
 
 
